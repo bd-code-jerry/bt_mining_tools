@@ -1,0 +1,4 @@
+-r requirements.txt
+# TestClient compatibility for older Starlette releases; newer releases prefer httpx2.
+httpx>=0.27,<1.0
+httpx2>=2.0,<3.0

@@ -384,6 +384,29 @@ thead th { background: var(--surface-soft); font-size: 11px; color: var(--text-7
   padding: 22px 16px;
 }
 
+.workspace-select-control {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text-500);
+  font-size: 12px;
+  font-weight: 700;
+}
+.workspace-select {
+  min-width: 190px;
+  width: auto;
+  color: var(--text-900);
+  font-size: 13px;
+}
+.workspace-context {
+  margin-top: 8px;
+  color: var(--text-500);
+  font-size: 13px;
+}
+.workspace-context strong {
+  color: var(--text-700);
+}
+
 @media (max-width: 1120px) {
   .usage-provider-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -418,5 +441,13 @@ thead th { background: var(--surface-soft); font-size: 11px; color: var(--text-7
   }
   .usage-provider-grid {
     grid-template-columns: 1fr;
+  }
+  .workspace-select-control {
+    width: 100%;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .workspace-select {
+    width: 100%;
   }
 }

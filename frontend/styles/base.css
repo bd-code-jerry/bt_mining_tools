@@ -160,6 +160,8 @@ h3 { font-size: 16px; margin-bottom: 8px; }
 .input[readonly] { background: var(--surface-soft); color: var(--text-700); }
 .help { color: var(--text-500); font-size: 12px; }
 .error-text { color: var(--red-600); font-size: 13px; min-height: 18px; }
+.pending-notice { padding: 14px; border-radius: 8px; background: var(--surface-info); border: 1px solid var(--surface-info-border); color: var(--surface-info-text); }
+.input:disabled { opacity: .65; cursor: wait; }
 
 .card {
   background: var(--surface);

@@ -2,13 +2,15 @@
 
 A small team dashboard for manually tracking API-provider balances and usage.
 
-The current build intentionally contains only:
+The current build includes:
 
-- **Dashboard** — empty placeholder page for future features.
-- **API keys balances** — current balances, cumulative usage, per-API usage ranges, new history entries, and editable saved history.
-- **Login / Register** — separate team accounts stored in the same local SQLite database.
+- **API keys balances** — workspace-scoped balances, usage ranges, and editable history.
+- **Total Balance** — current total, remaining balance, and cumulative spend by provider and workspace, with an overall team summary.
+- **User management** — admin approval, account roles/status, sessions, and timezone-aware login activity.
+- **Login / Register** — accounts stored in the server's single SQLite database; new registrations wait for admin approval.
+- **Light / dark mode** and an account-level **UTC / Eastern Time (ET)** preference.
 
-The code is split into small frontend pages/components and backend routers/services so you can add more pages later without rebuilding the whole project.
+The frontend uses a page registry and feature folders. The backend groups routes, schemas, services, and repositories by feature. See [Architecture](docs/architecture.md) and [Adding a feature](docs/adding-features.md) before extending the project.
 
 A fresh install starts with the provider catalog and no balance history. Add your own balances after creating an account. Existing database files keep their current history.
 
@@ -75,6 +77,24 @@ Preset ranges end on the latest saved history date rather than the computer cloc
 
 Each API key keeps its own unit. USD, credits, and Chutes `t` are shown separately instead of being added together into a meaningless mixed-unit total.
 
+### Total Balance
+
+The **Total Balance** page shows the latest total and left balances plus cumulative spend for each provider. It shows each workspace and a team total, while keeping USD, credits, and other provider units separate. It exposes aggregate numbers only; it does not show another workspace's dated entries or detailed history.
+
+### Accounts and workspaces
+
+The first account registered in a fresh database becomes the admin. Later self-registrations stay pending and cannot sign in until an admin approves or denies them. An admin can also create active accounts directly.
+
+| Role | Balance access |
+| --- | --- |
+| Admin | Read and edit balances in any workspace; manage accounts and sessions. |
+| Member | Read-only access to the shared workspace. |
+| User | Read and edit their own private workspace. |
+
+All three roles can read the aggregate Total Balance page and change their own timezone. Login event timestamps and daily counts use the viewing admin's timezone. The stored choices are `UTC` and `America/New_York`; Eastern Time follows daylight-saving changes. Balance entry dates remain date-only values.
+
+Login events are saved separately from live sessions, so signing out does not remove the login record. The login event list returns up to 500 recent matches, and a daily report can cover at most 367 calendar days.
+
 ### Light and dark appearance
 
 Use the **Light mode / Dark mode** button on the sign-in and registration pages or in the sidebar after signing in. Your choice is saved in the current browser and is used the next time you open the dashboard.
@@ -84,57 +104,46 @@ Use the **Light mode / Dark mode** button on the sign-in and registration pages 
 ```text
 bd-api-balances/
 │
-├── backend/
-│   └── app/
-│       ├── main.py                    # FastAPI app + frontend hosting
-│       ├── config.py                  # .env/server/database settings
-│       ├── database.py                # SQLite schema/connection
-│       ├── security.py                # password/session security
-│       ├── dependencies.py            # logged-in-user dependency
-│       ├── routers/
-│       │   ├── auth.py                # login/register/logout/me API
-│       │   ├── balances.py            # balance/history API endpoints
-│       │   └── usage.py               # usage-range API endpoint
-│       └── services/
-│           ├── balance_service.py     # balance calculations + history logic
-│           ├── usage_service.py       # totals by API key/date range
-│           └── seed_service.py        # initial API provider catalog
+├── backend/app/
+│   ├── core/                           # config, database, security, permissions
+│   ├── features/
+│   │   ├── auth/                       # sign-in, registration, sessions
+│   │   ├── balances/                   # balance history and provider catalog
+│   │   ├── preferences/                # account timezone
+│   │   ├── total_balances/             # aggregate-only team summary
+│   │   ├── usage/                      # date-range usage reports
+│   │   ├── users/                      # admin account and login APIs
+│   │   └── workspaces/                 # shared/private workspace access
+│   ├── migrations/                     # ordered SQLite schema migrations
+│   ├── api.py                          # registers feature routers
+│   └── main.py                         # FastAPI app and static frontend
 │
 ├── frontend/
 │   ├── index.html
-│   ├── styles/
-│   │   ├── base.css                   # buttons, fields, cards, modal
-│   │   ├── layout.css                 # sidebar + general page layout
-│   │   ├── auth.css                   # login/register pages
-│   │   └── balances.css               # API balance page styling
+│   ├── styles/                         # base, layout, auth, balances, users, totals
 │   └── js/
-│       ├── app.js                     # frontend router
-│       ├── theme.js                   # theme preference and switching
-│       ├── api/client.js              # calls backend APIs
-│       ├── components/
-│       │   ├── sidebar.js
-│       │   ├── themeToggle.js
-│       │   ├── modal.js
-│       │   ├── toast.js
-│       │   └── usageRangeSummary.js   # 1 day/week/month/custom usage UI
-│       ├── config/
-│       │   └── providerUi.js           # provider symbols used by balance UI
-│       ├── pages/
-│       │   ├── dashboardPage.js       # empty dashboard page
-│       │   ├── apiBalancesPage.js     # main page + edit history modal
-│       │   ├── loginPage.js
-│       │   └── registerPage.js
-│       └── utils/format.js
+│       ├── app/                        # route parsing and page registry
+│       ├── shared/                     # API client, shell components, utilities
+│       ├── features/
+│       │   ├── auth/
+│       │   ├── balances/               # page, API, history component
+│       │   ├── preferences/
+│       │   ├── total-balances/
+│       │   ├── usage/
+│       │   ├── users/                  # page, API, account/activity components
+│       │   └── workspaces/
+│       ├── app.js
+│       └── theme.js
+│
+├── docs/                               # architecture and extension guide
+├── tests/                              # Python backend and Node frontend tests
 │
 ├── data/
-│   └── bd_dashboard.db               # created automatically on first run
-│
-├── tests/
-│   ├── test_balance_integrity.py      # balance and startup regressions
-│   ├── test_theme_state.mjs           # theme persistence and control state
-│   └── test_theme_ui.mjs              # theme controls on app screens
+│   ├── bd_dashboard.db                # created automatically on first run
+│   └── backups/                       # pre-migration SQLite backups
 ├── .env.example
 ├── requirements.txt
+├── requirements-dev.txt
 ├── run.py
 ├── setup-windows.bat
 ├── start-windows.bat
@@ -160,7 +169,7 @@ Double-click:
 setup-windows.bat
 ```
 
-It creates `.venv`, installs FastAPI/Uvicorn **inside that virtual environment**, and creates `.env` from `.env.example`. The setup script uses any working Python 3.10+ installation already on the PC and uses `.venv\Scripts\python.exe` directly, so it does not depend on `activate.bat` or require Python 3.11 specifically.
+It creates `.venv`, installs the runtime requirements from `requirements.txt` **inside that virtual environment**, and creates `.env` from `.env.example`. This includes the timezone database package needed on Windows. The setup script uses any working Python 3.10+ installation already on the PC and uses `.venv\Scripts\python.exe` directly, so it does not depend on `activate.bat` or require Python 3.11 specifically.
 
 If an earlier setup attempt left an incomplete `.venv`, run `setup-windows.bat` again. The corrected script removes the incomplete environment and rebuilds it.
 
@@ -194,7 +203,9 @@ On the computer running the server, open:
 http://127.0.0.1:8765
 ```
 
-Register your first account, then sign in.
+On a fresh database, the first registration becomes the admin. Later registrations wait for approval. Sign in to approve them on the **Users** page.
+
+For an existing dashboard database, see [Using an existing database](docs/architecture.md#using-an-existing-database) before starting the app. Set `BD_DATABASE_PATH` to the database file before the first startup so the app does not initialize a new default database.
 
 ## Let teammates use it from another PC on the same network
 
@@ -236,11 +247,13 @@ http://192.168.1.50:8765
 
 Replace `192.168.1.50` with the actual IPv4 address of the computer running the dashboard.
 
-Every teammate registers/logs in through the same server, so everyone sees the same balance history stored in:
+Everyone signs in to the same server and database. Admins and members use shared balance history; users get a private workspace. All roles can see the aggregate Total Balance page. By default the database file is:
 
 ```text
 data/bd_dashboard.db
 ```
+
+Use the admin **Users** page to approve registrations and set each account to `admin`, `member`, or `user`.
 
 ## Access from outside your home/office network
 
@@ -260,66 +273,15 @@ BD_COOKIE_SECURE=true
 
 ## Where to edit things later
 
-### Change the API balance page
+Each page lives in its frontend feature folder, for example `frontend/js/features/balances/` or `frontend/js/features/users/`. Backend endpoints and business logic live in the matching `backend/app/features/<feature>/` folder. Add page routes in `frontend/js/app/pageRegistry.js`; sidebar links are generated from that registry and the account's capabilities. Register backend routers in `backend/app/api.py`.
 
-```text
-frontend/js/pages/apiBalancesPage.js
-```
-
-### Change login/register pages
-
-```text
-frontend/js/pages/loginPage.js
-frontend/js/pages/registerPage.js
-```
-
-### Add a new page
-
-1. Create a new file in:
-
-```text
-frontend/js/pages/
-```
-
-2. Add the link in:
-
-```text
-frontend/js/components/sidebar.js
-```
-
-3. Add the route in:
-
-```text
-frontend/js/app.js
-```
-
-### Add a new backend function/API
-
-Create or edit a router in:
-
-```text
-backend/app/routers/
-```
-
-For larger business logic, put the logic in:
-
-```text
-backend/app/services/
-```
-
-Then include the router from:
-
-```text
-backend/app/main.py
-```
+For a step-by-step example, see [Adding a feature](docs/adding-features.md).
 
 ### Change the API provider catalog
 
-```text
-backend/app/services/seed_service.py
-```
+`backend/app/features/balances/provider_catalog.py` defines the initial provider catalog. It is added on startup when missing; sample balance history is not seeded.
 
-The catalog is added on startup when missing. The app does not seed sample balance history. Existing history remains in your database.
+The app does not seed sample balance history. Existing history remains in your database.
 
 ## Database backup
 
@@ -329,12 +291,15 @@ Stop the dashboard and copy this file somewhere safe:
 data/bd_dashboard.db
 ```
 
-That single file contains users, sessions, API providers, and balance history.
+That single file contains accounts, sessions, workspaces, providers, balance history, login events, and preferences.
+
+Before a legacy database is upgraded, the migration runner creates a SQLite backup in `data/backups/` (or beside the configured database file in its `backups/` subfolder). Keep independent backups as well. Stop the server before manually copying or replacing the live database.
 
 ## Run the integrity tests
 
-From the project folder, run:
+Install the development dependencies once with `python -m pip install -r requirements-dev.txt`. Then run from the project folder:
 
 ```bash
-python -m unittest discover -s tests -v
+python -m unittest discover -s tests -p 'test_*.py' -v
+node --test tests/*.mjs
 ```

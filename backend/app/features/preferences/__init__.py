@@ -1,0 +1,1 @@
+"""Per-account display preferences."""
