@@ -20,24 +20,24 @@ function fakeAuthContainer() {
   };
 }
 
-test("signed-in navigation includes a theme toggle", () => {
+test("signed-in navigation includes an appearance selector", () => {
   const html = sidebarHtml("dashboard", { username: "tester" });
-  assert.match(html, /data-theme-toggle/);
+  assert.match(html, /data-theme-select/);
 });
 
-test("sign-in page includes a theme toggle", () => {
+test("sign-in page includes an appearance selector", () => {
   const container = fakeAuthContainer();
   renderLoginPage(container, { onSignedIn() {} });
-  assert.match(container.innerHTML, /data-theme-toggle/);
+  assert.match(container.innerHTML, /data-theme-select/);
 });
 
-test("registration page includes a theme toggle", async () => {
+test("registration page includes an appearance selector", async () => {
   const original = authApi.getRegistrationConfig;
   authApi.getRegistrationConfig = async () => ({ registration_code_required: false, registration_enabled: true });
   try {
     const container = fakeAuthContainer();
     await renderRegisterPage(container, { onSignedIn() {} });
-    assert.match(container.innerHTML, /data-theme-toggle/);
+    assert.match(container.innerHTML, /data-theme-select/);
   } finally {
     authApi.getRegistrationConfig = original;
   }

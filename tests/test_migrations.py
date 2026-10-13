@@ -89,7 +89,7 @@ class MigrationTests(unittest.TestCase):
             shared_count = conn.execute("SELECT COUNT(*) FROM workspaces WHERE kind = 'shared'").fetchone()[0]
             user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         self.assertIn("history_values", tables)
-        self.assertEqual(versions, [1, 2, 3])
+        self.assertEqual(versions, [1, 2, 3, 4, 5])
         self.assertEqual(shared_count, 1)
         self.assertEqual(user_count, 0)
 
@@ -100,7 +100,7 @@ class MigrationTests(unittest.TestCase):
             versions = [row[0] for row in conn.execute("SELECT version FROM schema_migrations ORDER BY version")]
             workspace_count = conn.execute("SELECT COUNT(*) FROM workspaces").fetchone()[0]
             value = conn.execute("SELECT total_balance FROM history_values WHERE id = ?", (self.ids["value_id"],)).fetchone()[0]
-        self.assertEqual(versions, [1, 2, 3])
+        self.assertEqual(versions, [1, 2, 3, 4, 5])
         self.assertEqual(workspace_count, 1)
         self.assertEqual(value, 20.0)
 

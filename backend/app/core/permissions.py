@@ -4,6 +4,9 @@ from fastapi import HTTPException, status
 
 ROLE_CAPABILITIES: dict[str, tuple[str, ...]] = {
     "admin": (
+        "expenses:read",
+        "expenses:write",
+        "expenses:manage",
         "balances:read",
         "balances:write",
         "usage:read",
@@ -14,6 +17,7 @@ ROLE_CAPABILITIES: dict[str, tuple[str, ...]] = {
         "preferences:timezone:write",
     ),
     "member": (
+        "expenses:read",
         "balances:read",
         "usage:read",
         "workspaces:read",
@@ -21,6 +25,8 @@ ROLE_CAPABILITIES: dict[str, tuple[str, ...]] = {
         "preferences:timezone:write",
     ),
     "user": (
+        "expenses:read",
+        "expenses:write",
         "balances:read",
         "balances:write",
         "usage:read",

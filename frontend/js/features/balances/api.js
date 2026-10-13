@@ -7,8 +7,8 @@ function withWorkspace(path, workspaceId) {
 }
 
 export const balancesApi = {
-  getOverview: (page = 1, pageSize = 5, workspaceId = null) => {
-    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+  getOverview: (page = 1, pageSize = 5, workspaceId = null, topupPage = 1, topupPageSize = 5) => {
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize), topup_page: String(topupPage), topup_page_size: String(topupPageSize) });
     if (workspaceId != null) params.set("workspace_id", String(workspaceId));
     return request(`/api/balances/overview?${params.toString()}`);
   },
@@ -20,6 +20,8 @@ export const balancesApi = {
     request(withWorkspace(`/api/balances/history/${id}`, workspaceId)),
   updateHistory: (id, body, workspaceId = null) =>
     request(withWorkspace(`/api/balances/history/${id}`, workspaceId), { method: "PUT", body: JSON.stringify(body) }),
+  updateAddedBalance: (id, body, workspaceId = null) =>
+    request(withWorkspace(`/api/balances/add-balance/${id}`, workspaceId), { method: "PUT", body: JSON.stringify(body) }),
   deleteHistory: (id, workspaceId = null) =>
     request(withWorkspace(`/api/balances/history/${id}`, workspaceId), { method: "DELETE" }),
 };

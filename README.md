@@ -1,20 +1,32 @@
-# BD API Key Balances Dashboard
+# BD Mining Tools
 
-A small team dashboard for manually tracking API-provider balances and usage.
+A team dashboard for saved expenses, per-person spending, and Subnet 67 API-provider balances and usage. For an existing installation, follow [UPDATE-v1.3.1.md](UPDATE-v1.3.1.md) to copy this source over the project while keeping its database and configuration. This release loads a versioned frontend to prevent an old browser module from hiding Overview and Used.
 
 The current build includes:
 
+- **Overview / Used** — shared funding and expense records, saved equal allocations, per-user/member totals, and combined person/category/date filters.
+- **Purpose categories** — standalone categories or optional subcategories, with Add category in the cost form.
+- **67 API keys** — expandable navigation for Subnet 67's API key balances and Total Balance pages.
 - **API keys balances** — workspace-scoped balances, usage ranges, and editable history.
+- **Added Balance History** — a separate top-up table with prior, added, and resulting balances; old rows remain explicitly unclassified until corrected.
 - **Total Balance** — current total, remaining balance, and cumulative spend by provider and workspace, with an overall team summary.
 - **User management** — admin approval, account roles/status, sessions, and timezone-aware login activity.
 - **Login / Register** — accounts stored in the server's single SQLite database; new registrations wait for admin approval.
-- **Light / dark mode** and an account-level **UTC / Eastern Time (ET)** preference.
+- **Light, Dark, Sand, Forest, and Midnight themes**, plus an account-level **UTC / Eastern Time (ET)** preference.
 
 The frontend uses a page registry and feature folders. The backend groups routes, schemas, services, and repositories by feature. See [Architecture](docs/architecture.md) and [Adding a feature](docs/adding-features.md) before extending the project.
 
 A fresh install starts with the provider catalog and no balance history. Add your own balances after creating an account. Existing database files keep their current history.
 
 ## Main behavior
+
+### Manual expense ledger
+
+Overview and Used show each person's saved expense shares. Search users, select a category (including descendants), and choose All time, 1 Day, 1 Week, 1 Month (30 days), or an inclusive custom range. Combine filters to see where someone spent money and their total for that period. Ledger presets end on today in the viewer's UTC/ET timezone.
+
+Used shows Origin (sent transfers), Received (receipts), total recorded costs, and remaining balance. Remaining balance is received funds minus manual expenses; sent transfers are tracked separately. Add cost opens amount, date, category/purpose, optional note, and participant checkboxes with Select all. Equal allocations are saved with the expense. Funding cards show all-time team totals independently of report filters.
+
+The manual ledger does not import API history or usage. API balances and histories remain on Subnet 67 pages with original workspace authorization. See [UPDATE-v1.3.md](UPDATE-v1.3.md) for ledger permissions and retained history after account deletion.
 
 ### New Balance
 
@@ -50,7 +62,7 @@ Saving creates a new balance snapshot. Added funds/credits are not counted as us
 
 ### Balance History
 
-History has server-side pagination with selectable page sizes of 5, 10, 20 or 50 rows.
+Ordinary Balance History and Added Balance History have separate server-side pagination with page sizes of 5, 10, 20 or 50 rows. New additions show provider, date, prior balance, amount added, resulting balance, and unit in Added Balance History. Existing snapshots are labelled Legacy / unclassified because the old database did not identify additions. Editors can classify eligible old rows with actual addition amounts; the app never invents values.
 
 Each saved row has:
 
@@ -95,9 +107,9 @@ All three roles can read the aggregate Total Balance page and change their own t
 
 Login events are saved separately from live sessions, so signing out does not remove the login record. The login event list returns up to 500 recent matches, and a daily report can cover at most 367 calendar days.
 
-### Light and dark appearance
+### Appearance themes
 
-Use the **Light mode / Dark mode** button on the sign-in and registration pages or in the sidebar after signing in. Your choice is saved in the current browser and is used the next time you open the dashboard.
+Use the appearance selector on sign-in/registration pages or in the sidebar. Choose Light, Dark, Sand, Forest, or Midnight. Your choice is saved in the browser for the next visit. Existing saved Light/Dark choices keep working.
 
 ## Folder structure
 

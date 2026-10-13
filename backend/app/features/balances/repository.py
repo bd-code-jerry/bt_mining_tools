@@ -11,9 +11,10 @@ def list_providers(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def history_count(conn: sqlite3.Connection, workspace_id: int) -> int:
+def history_count(conn: sqlite3.Connection, workspace_id: int, *, topups: bool | None = None) -> int:
     row = conn.execute(
-        "SELECT COUNT(*) AS c FROM history_entries WHERE workspace_id = ?",
+        "SELECT COUNT(*) AS c FROM history_entries WHERE workspace_id = ?" +
+        (" AND entry_kind = 'topup'" if topups is True else " AND entry_kind != 'topup'" if topups is False else ""),
         (workspace_id,),
     ).fetchone()
     return int(row["c"] if row else 0)
@@ -25,21 +26,22 @@ def list_history(
     *,
     page: int,
     page_size: int,
+    topups: bool = False,
 ) -> list[dict[str, Any]]:
     offset = (page - 1) * page_size
     rows = conn.execute(
-        """SELECT id, entry_date, created_at, updated_at FROM history_entries
-           WHERE workspace_id = ?
+        """SELECT id, entry_date, created_at, updated_at, entry_kind FROM history_entries
+           WHERE workspace_id = ? AND (entry_kind = 'topup') = ?
            ORDER BY entry_date DESC, id DESC
            LIMIT ? OFFSET ?""",
-        (workspace_id, page_size, offset),
+        (workspace_id, int(topups), page_size, offset),
     ).fetchall()
     return [_entry_to_dict(conn, row) for row in rows]
 
 
 def latest_entry(conn: sqlite3.Connection, workspace_id: int) -> dict[str, Any] | None:
     row = conn.execute(
-        """SELECT id, entry_date, created_at, updated_at FROM history_entries
+        """SELECT id, entry_date, created_at, updated_at, entry_kind FROM history_entries
            WHERE workspace_id = ?
            ORDER BY entry_date DESC, id DESC
            LIMIT 1""",
@@ -54,7 +56,7 @@ def get_history_entry(
     workspace_id: int,
 ) -> dict[str, Any] | None:
     row = conn.execute(
-        """SELECT id, entry_date, created_at, updated_at FROM history_entries
+        """SELECT id, entry_date, created_at, updated_at, entry_kind FROM history_entries
            WHERE id = ? AND workspace_id = ?""",
         (entry_id, workspace_id),
     ).fetchone()
@@ -66,13 +68,14 @@ def get_history_entry(
 def _entry_to_dict(conn: sqlite3.Connection, entry_row: sqlite3.Row) -> dict[str, Any]:
     values = conn.execute(
         """SELECT p.provider_key, p.display_name, p.unit, p.sort_order,
-                  hv.total_balance, hv.used_balance, hv.left_balance
+                  hv.total_balance, hv.used_balance, hv.left_balance, hv.added_balance, hv.balance_before
            FROM history_values hv JOIN providers p ON p.id = hv.provider_id
            WHERE hv.entry_id = ? ORDER BY p.sort_order""",
         (entry_row["id"],),
     ).fetchall()
     return {
         "id": int(entry_row["id"]),
+        "entry_kind": entry_row["entry_kind"],
         "entry_date": entry_row["entry_date"],
         "created_at": entry_row["created_at"],
         "updated_at": entry_row["updated_at"],
@@ -105,11 +108,12 @@ def insert_history_entry(
     created_at: str,
     user_id: int,
     workspace_id: int,
+    entry_kind: str = "balance",
 ) -> int:
     cursor = conn.execute(
-        """INSERT INTO history_entries(entry_date, created_at, updated_at, created_by, updated_by, workspace_id)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (entry_date, created_at, created_at, user_id, user_id, workspace_id),
+        """INSERT INTO history_entries(entry_date, created_at, updated_at, created_by, updated_by, workspace_id, entry_kind)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (entry_date, created_at, created_at, user_id, user_id, workspace_id, entry_kind),
     )
     return int(cursor.lastrowid)
 
@@ -122,11 +126,13 @@ def insert_value(
     total: float,
     used: float,
     left: float,
+    added_balance: float | None = None,
+    balance_before: float | None = None,
 ) -> None:
     conn.execute(
-        """INSERT INTO history_values(entry_id, provider_id, total_balance, used_balance, left_balance)
-           VALUES (?, ?, ?, ?, ?)""",
-        (entry_id, provider_id, total, used, left),
+        """INSERT INTO history_values(entry_id, provider_id, total_balance, used_balance, left_balance, added_balance, balance_before)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (entry_id, provider_id, total, used, left, added_balance, balance_before),
     )
 
 
@@ -138,11 +144,13 @@ def update_value(
     total: float,
     used: float,
     left: float,
+    added_balance: float | None = None,
+    balance_before: float | None = None,
 ) -> None:
     conn.execute(
-        """UPDATE history_values SET total_balance = ?, used_balance = ?, left_balance = ?
+        """UPDATE history_values SET total_balance = ?, used_balance = ?, left_balance = ?, added_balance = ?, balance_before = ?
            WHERE entry_id = ? AND provider_id = ?""",
-        (total, used, left, entry_id, provider_id),
+        (total, used, left, added_balance, balance_before, entry_id, provider_id),
     )
 
 

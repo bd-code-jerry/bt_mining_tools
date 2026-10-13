@@ -1,6 +1,27 @@
 export const pageRegistry = [
   {
+    route: "overview",
+    label: "Overview",
+    icon: "◈",
+    capability: "expenses:read",
+    async render(container, options) {
+      const { renderOverviewPage } = await import("../features/overview/page.js");
+      return renderOverviewPage(container, options);
+    },
+  },
+  {
+    route: "used",
+    label: "Used",
+    icon: "◷",
+    capability: "expenses:read",
+    async render(container, options) {
+      const { renderUsedPage } = await import("../features/used/page.js");
+      return renderUsedPage(container, options);
+    },
+  },
+  {
     route: "api-balances",
+    group: "subnet-67",
     label: "API key balances",
     icon: "⚿",
     capability: "balances:read",
@@ -11,6 +32,7 @@ export const pageRegistry = [
   },
   {
     route: "total-balances",
+    group: "subnet-67",
     label: "Total Balance",
     icon: "Σ",
     capability: "total_balances:read",

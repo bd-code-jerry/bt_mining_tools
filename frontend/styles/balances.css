@@ -451,3 +451,9 @@ thead th { background: var(--surface-soft); font-size: 11px; color: var(--text-7
     width: 100%;
   }
 }
+
+/* Keep the two history sections visually distinct across appearance presets. */
+.topup-amount { color: var(--green-700); font-weight: 800; }
+.topup-history-table td[rowspan] { vertical-align: top; }
+.legacy-label { white-space: normal; max-width: 140px; }
+#balance-history-section, #added-balance-history-section { scroll-margin-top: 14px; }

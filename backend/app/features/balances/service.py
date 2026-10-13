@@ -18,27 +18,26 @@ def overview(
     workspace_id: int,
     page: int = 1,
     page_size: int = 5,
+    topup_page: int = 1,
+    topup_page_size: int = 5,
 ) -> dict[str, Any]:
-    total_items = repository.history_count(conn, workspace_id)
-    safe_page_size = max(1, min(int(page_size), 100))
-    total_pages = max(1, ceil(total_items / safe_page_size)) if total_items else 1
-    safe_page = max(1, min(int(page), total_pages))
+    def history_page(requested_page, requested_size, *, topups):
+        count = repository.history_count(conn, workspace_id, topups=topups)
+        size = max(1, min(int(requested_size), 100))
+        pages = max(1, ceil(count / size))
+        selected = max(1, min(int(requested_page), pages))
+        return repository.list_history(conn, workspace_id, page=selected, page_size=size, topups=topups), {
+            "page": selected, "page_size": size, "total_items": count, "total_pages": pages,
+        }
+
+    history, pagination = history_page(page, page_size, topups=False)
+    additions, additions_pagination = history_page(topup_page, topup_page_size, topups=True)
     return {
         "providers": repository.list_providers(conn),
         "latest": repository.latest_entry(conn, workspace_id),
         "summary": repository.usage_summary(conn, workspace_id),
-        "history": repository.list_history(
-            conn,
-            workspace_id,
-            page=safe_page,
-            page_size=safe_page_size,
-        ),
-        "pagination": {
-            "page": safe_page,
-            "page_size": safe_page_size,
-            "total_items": total_items,
-            "total_pages": total_pages,
-        },
+        "history": history, "pagination": pagination,
+        "topup_history": additions, "topup_pagination": additions_pagination,
     }
 
 
@@ -66,7 +65,7 @@ def _as_number(value, field_name: str) -> float | None:
         raise HTTPException(status_code=422, detail=f"{field_name} must be a number.") from exc
     if not isfinite(number):
         raise HTTPException(status_code=422, detail=f"{field_name} must be a finite number.")
-    if number < -EPSILON:
+    if number < 0:
         raise HTTPException(status_code=422, detail=f"{field_name} cannot be negative.")
     return max(0.0, number)
 
@@ -166,6 +165,8 @@ def create_add_balance_entry(
     latest = repository.latest_entry(conn, workspace_id)
     latest_map = {value["provider_key"]: value for value in (latest["values"] if latest else [])}
     additions = payload.get("additions") or {}
+    if set(additions) - {p["provider_key"] for p in providers}:
+        raise HTTPException(status_code=422, detail="Unknown API provider in additions.")
     entry_date = str(payload.get("entry_date") or date.today().isoformat())
     normalized_additions: dict[str, float] = {}
     any_positive = False
@@ -173,7 +174,7 @@ def create_add_balance_entry(
         amount = _as_number(additions.get(provider["provider_key"]), f"{provider['display_name']} added balance")
         amount = 0.0 if amount is None else amount
         normalized_additions[provider["provider_key"]] = amount
-        any_positive = any_positive or amount > EPSILON
+        any_positive = any_positive or amount > 0
     if not any_positive:
         raise HTTPException(status_code=422, detail="Enter an amount greater than 0 for at least one API key.")
 
@@ -184,6 +185,7 @@ def create_add_balance_entry(
         created_at=now,
         user_id=user_id,
         workspace_id=workspace_id,
+        entry_kind="topup",
     )
     for provider in providers:
         previous_left = float(latest_map.get(provider["provider_key"], {}).get("left_balance", 0.0))
@@ -200,6 +202,8 @@ def create_add_balance_entry(
             total=new_total,
             used=0.0,
             left=new_total,
+            added_balance=normalized_additions[provider["provider_key"]],
+            balance_before=previous_left,
         )
     return get_history_entry(conn, entry_id, workspace_id)
 
@@ -212,7 +216,10 @@ def update_history_entry(
     *,
     workspace_id: int,
 ) -> dict[str, Any]:
+    conn.execute("BEGIN IMMEDIATE")
     existing = get_history_entry(conn, entry_id, workspace_id)
+    if existing["entry_kind"] == "topup":
+        raise HTTPException(status_code=409, detail="Use the added balance editor to correct this top-up.")
     providers = repository.list_providers(conn)
     existing_map = {value["provider_key"]: value for value in existing["values"]}
     incoming = payload.get("values") or {}
@@ -229,7 +236,7 @@ def update_history_entry(
         supplied = incoming.get(provider["provider_key"])
         if supplied is None:
             continue
-        old = existing_map[provider["provider_key"]]
+        old = existing_map.get(provider["provider_key"], {"total_balance": 0})
         total, used, left = _calculate_value(
             provider_name=provider["display_name"],
             total=supplied.get("total"),
@@ -237,7 +244,8 @@ def update_history_entry(
             left=supplied.get("left"),
             default_total=float(old["total_balance"]),
         )
-        repository.update_value(
+        save_value = repository.update_value if provider["provider_key"] in existing_map else repository.insert_value
+        save_value(
             conn,
             entry_id=entry_id,
             provider_id=int(provider["id"]),
@@ -251,3 +259,43 @@ def update_history_entry(
 def delete_history_entry(conn, entry_id: int, workspace_id: int) -> None:
     if not repository.delete_history_entry(conn, entry_id, workspace_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="History entry not found.")
+
+
+def update_add_balance_entry(conn, entry_id: int, user_id: int, payload: dict[str, Any], *, workspace_id: int) -> dict[str, Any]:
+    """Correct a recorded addition, or explicitly classify an unknown legacy snapshot."""
+    conn.execute("BEGIN IMMEDIATE")
+    existing = get_history_entry(conn, entry_id, workspace_id)
+    if existing["entry_kind"] not in {"legacy", "topup"}:
+        raise HTTPException(status_code=409, detail="Only legacy entries can be classified as top-ups.")
+    additions = payload.get("additions") or {}
+    values = {v["provider_key"]: v for v in existing["values"]}
+    if set(additions) - set(values):
+        raise HTTPException(status_code=422, detail="Unknown API provider in additions.")
+    normalized = {key: _as_number(additions.get(key, 0), f"{value['display_name']} added balance") or 0.0
+                  for key, value in values.items()}
+    if not any(amount > 0 for amount in normalized.values()):
+        raise HTTPException(status_code=422, detail="Enter an amount greater than 0 for at least one API key.")
+    provider_ids = {p["provider_key"]: p["id"] for p in repository.list_providers(conn)}
+    changes = []
+    for key, value in values.items():
+        added = normalized[key]
+        if existing["entry_kind"] == "legacy":
+            if value["used_balance"] != 0 or not isclose(value["total_balance"], value["left_balance"], rel_tol=0, abs_tol=1e-8):
+                raise HTTPException(status_code=422, detail="A legacy top-up must have zero usage and matching Total and Left balances.")
+            before = round(value["left_balance"] - added, 12)
+            if before < 0:
+                raise HTTPException(status_code=422, detail=f"{value['display_name']}: Added balance cannot exceed the saved balance.")
+            after = value["left_balance"]
+        else:
+            before = value["balance_before"]
+            after = round(before + added, 12)
+            if not isfinite(after):
+                raise HTTPException(status_code=422, detail=f"{value['display_name']}: Added balance exceeds the supported range.")
+        changes.append((key, before, added, after))
+    repository.update_entry_metadata(conn, entry_id=entry_id, workspace_id=workspace_id,
+        entry_date=str(payload.get("entry_date") or existing["entry_date"]), updated_at=utc_now_iso(), user_id=user_id)
+    conn.execute("UPDATE history_entries SET entry_kind = 'topup' WHERE id = ? AND workspace_id = ?", (entry_id, workspace_id))
+    for key, before, added, after in changes:
+        repository.update_value(conn, entry_id=entry_id, provider_id=provider_ids[key], total=after, used=0,
+            left=after, added_balance=added, balance_before=before)
+    return get_history_entry(conn, entry_id, workspace_id)

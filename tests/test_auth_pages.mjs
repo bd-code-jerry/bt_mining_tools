@@ -51,7 +51,7 @@ test("sign-in accepts username or email and shows theme control", async () => {
     const container = fakeContainer({ identifier: "person@example.com", password: "password" });
     renderLoginPage(container, { onSignedIn(user) { signedIn = user; } });
     assert.match(container.innerHTML, /Username or email/);
-    assert.match(container.innerHTML, /data-theme-toggle/);
+    assert.match(container.innerHTML, /data-theme-select/);
     await withFormData(() => container.form.submit());
     assert.deepEqual(submitted, { identifier: "person@example.com", password: "password" });
     assert.equal(signedIn.role, "member");
@@ -65,6 +65,8 @@ test("registration requires email and shows pending approval without signing in"
   const registerOriginal = authApi.register;
   let submitted;
   let signedIn = false;
+  const originalDocument = globalThis.document;
+  globalThis.document = { documentElement: { dataset: { theme: "sand" } } };
   authApi.getRegistrationConfig = async () => ({ registration_code_required: false, registration_enabled: true });
   authApi.register = async (body) => {
     submitted = body;
@@ -81,14 +83,16 @@ test("registration requires email and shows pending approval without signing in"
     await renderRegisterPage(container, { onSignedIn() { signedIn = true; } });
     assert.match(container.innerHTML, /type="email"/);
     assert.match(container.innerHTML, /name="email"[^>]*required/);
-    assert.match(container.innerHTML, /data-theme-toggle/);
+    assert.match(container.innerHTML, /data-theme-select/);
     await withFormData(() => container.form.submit());
     assert.equal(submitted.email, "person@example.com");
     assert.match(container.innerHTML, /waiting for admin approval/i);
+    assert.match(container.innerHTML, /value="sand" selected/);
     assert.equal(signedIn, false);
   } finally {
     authApi.getRegistrationConfig = configOriginal;
     authApi.register = registerOriginal;
+    globalThis.document = originalDocument;
   }
 });
 

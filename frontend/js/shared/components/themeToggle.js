@@ -1,10 +1,15 @@
+import { THEME_PRESETS } from "../../theme.js";
+import { escapeHtml } from "../utils/format.js";
+
+// Keep the shared export name so all auth states use the same appearance selector.
 export function themeToggleHtml(variant = "") {
-  const variantClass = variant ? ` ${variant}` : "";
+  const variantClass = variant ? ` ${escapeHtml(variant)}` : "";
+  const current = globalThis.document?.documentElement?.dataset.theme || "light";
+  const options = THEME_PRESETS.map((preset) => `<option value="${preset.id}"${preset.id === current ? " selected" : ""}>${preset.label}</option>`).join("");
   return `
-    <button class="theme-toggle${variantClass}" type="button" data-theme-toggle
-      aria-label="Switch to dark mode" aria-pressed="false">
-      <span class="theme-toggle-icon" data-theme-icon aria-hidden="true">☾</span>
-      <span data-theme-label>Dark mode</span>
-    </button>
+    <label class="theme-control${variantClass}">
+      <span>Appearance</span>
+      <select class="theme-select" data-theme-select>${options}</select>
+    </label>
   `;
 }

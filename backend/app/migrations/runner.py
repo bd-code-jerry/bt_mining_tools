@@ -4,12 +4,20 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .versions import v001_base_schema, v002_roles_workspaces, v003_timezone_preference
+from .versions import (
+    v001_base_schema,
+    v002_roles_workspaces,
+    v003_timezone_preference,
+    v004_expense_ledger,
+    v005_balance_additions,
+)
 
 MIGRATIONS = (
     v001_base_schema,
     v002_roles_workspaces,
     v003_timezone_preference,
+    v004_expense_ledger,
+    v005_balance_additions,
 )
 LEGACY_BASE_TABLES = {"users", "sessions", "providers", "history_entries", "history_values"}
 

@@ -73,7 +73,7 @@ test("theme buttons describe the mode they will switch to", () => {
   };
   globalThis.document = { documentElement: { dataset: { theme: "dark" } } };
   try {
-    syncThemeButtons({ querySelectorAll: () => [button] });
+    syncThemeButtons({ querySelectorAll: (selector) => selector === "[data-theme-toggle]" ? [button] : [] });
     assert.equal(attrs["aria-pressed"], "true");
     assert.equal(attrs["aria-label"], "Switch to light mode");
     assert.equal(label.textContent, "Light mode");
@@ -103,7 +103,7 @@ test("clicking the theme button changes the page, saves it, and updates its labe
     addEventListener(type, handler) {
       if (type === "click") clickHandler = handler;
     },
-    querySelectorAll: () => [button],
+    querySelectorAll: (selector) => selector === "[data-theme-toggle]" ? [button] : [],
   };
   initializeTheme({ root, storage });
   themeModule.bindThemeToggleEvents({ container, root, storage });
@@ -115,4 +115,50 @@ test("clicking the theme button changes the page, saves it, and updates its labe
   assert.equal(attrs["aria-label"], "Switch to light mode");
   assert.equal(label.textContent, "Light mode");
   assert.equal(icon.textContent, "☀");
+});
+
+for (const [theme, scheme] of [["light", "light"], ["dark", "dark"], ["sand", "light"], ["forest", "dark"], ["midnight", "dark"]]) {
+  test(`selection and startup restore ${theme} with native ${scheme} scheme`, () => {
+    assert.equal(typeof themeModule.selectTheme, "function");
+    const root = fakeRoot();
+    const storage = fakeStorage();
+    assert.equal(themeModule.selectTheme(theme, { root, storage }), theme);
+    assert.equal(root.dataset.theme, theme);
+    assert.equal(root.style.colorScheme, scheme);
+    assert.equal(storage.value("bd-dashboard-theme"), theme);
+    const restored = fakeRoot();
+    assert.equal(initializeTheme({ root: restored, storage }), theme);
+    assert.equal(restored.style.colorScheme, scheme);
+  });
+}
+
+test("preset selection handles invalid IDs and blocked storage", () => {
+  assert.equal(typeof themeModule.selectTheme, "function");
+  const root = fakeRoot();
+  const storage = { setItem() { throw new Error("blocked"); } };
+  assert.equal(themeModule.selectTheme("forest", { root, storage }), "forest");
+  assert.equal(root.style.colorScheme, "dark");
+  assert.equal(themeModule.selectTheme("unknown", { root, storage }), "light");
+});
+
+test("delegated selector change persists appearance and synchronizes rerendered controls", () => {
+  const root = fakeRoot();
+  const storage = fakeStorage();
+  const first = { value: "light" };
+  let selectors = [first];
+  const handlers = {};
+  const container = {
+    addEventListener(type, handler) { handlers[type] = handler; },
+    querySelectorAll(selector) { return selector === "[data-theme-select]" ? selectors : []; },
+  };
+  themeModule.bindThemeToggleEvents({ container, root, storage });
+  assert.equal(typeof handlers.change, "function");
+  first.value = "midnight";
+  handlers.change({ target: { closest: () => first } });
+  assert.equal(root.dataset.theme, "midnight");
+  assert.equal(storage.value("bd-dashboard-theme"), "midnight");
+  const rerendered = { value: "light" };
+  selectors = [first, rerendered];
+  syncThemeButtons(container, root);
+  assert.equal(rerendered.value, "midnight");
 });

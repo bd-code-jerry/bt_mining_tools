@@ -1,6 +1,6 @@
 # Architecture and data model
 
-BD API Key Balances is a single-server application. FastAPI serves the API and the static frontend; SQLite stores accounts, sessions, workspaces, provider metadata, balance history, login events, and account preferences in one database file.
+BD Mining Tools is a single-server application. FastAPI serves the API and static frontend; SQLite stores accounts, sessions, workspaces, provider metadata, balance history and additions, the manual expense ledger, login events, and account preferences in one database file.
 
 ## Main code areas
 
@@ -34,6 +34,20 @@ Set `BD_DATABASE_PATH` to choose the SQLite file. The default is `data/bd_dashbo
 All signed-in roles can read `/api/total-balances/summary`. It returns each workspace's current total, left balance, and cumulative spend, plus provider totals across the team. Provider units remain separate. The endpoint returns no dated entries, detailed history, or edit operations, so access to it does not grant access to another workspace's balance history.
 
 All signed-in roles can choose UTC or Eastern Time (ET) for their account. The stored values are `UTC` and `America/New_York`; Eastern Time follows daylight-saving changes. Session and login-event timestamps are stored in UTC. Admin login-event display and daily grouping use the admin's selected timezone. Balance entry dates are date-only and do not change with timezone selection.
+
+## Manual team expense ledger
+
+`backend/app/features/expenses/` owns categories, participants, transfers, costs, allocations, and reports. Routers and validated schemas call services; repositories persist records; category/report/validation helpers keep the feature focused. Frontend `features/expenses/` shares the reports and forms rendered by Overview and Used.
+
+The ledger is shared separately from API workspaces. Every active role has `expenses:read`; admins and users have `expenses:write`; admins have `expenses:manage`. User corrections require creator ownership. Category changes require admin management; category creation allows writers. The participant list exposes only ledger IDs, names, roles, status and eligibility.
+
+Amounts use integer cents. Costs and their saved equal shares commit together. Request identifiers deduplicate identical retries and reject conflicting reuse. Participant identities survive account deletion, and costs retain their saved category path. Person/category/date filters and totals use the same matching allocation rules; totals are independent of pagination. Ledger presets end on today in the actor's UTC/ET timezone, unlike the provider usage presets.
+
+## Subnet 67 histories and appearance
+
+API workspaces keep the access rules above. Version 5 adds explicit history kinds and per-provider before/added metadata. Ordinary/legacy history and typed additions have separate queries and pagination; the latest snapshot and aggregate calculation still include both. Old rows are unclassified until an authorized explicit correction supplies valid additions. No provider snapshots are imported into manual expense totals.
+
+The sidebar groups API key balances and Total Balance under 67 API keys. Overview is the default protected page, and explicit protected hash routes survive refresh. Shared appearance controls use a five-preset catalog (Light, Dark, Sand, Forest, Midnight), the existing browser storage key, and native light/dark schemes. Preferences restore before page rendering and do not alter account or workspace state.
 
 ## Registration and account lifecycle
 

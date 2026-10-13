@@ -2,7 +2,7 @@ import { balancesApi as api } from "./api.js";
 import { usageApi } from "../usage/api.js";
 import { workspacesApi } from "../workspaces/api.js";
 import { chooseWorkspaceForRole, workspaceContextHtml, workspaceSelectorHtml } from "../workspaces/components/workspaceSelector.js";
-import { balanceHistoryTableHtml } from "./components/history.js";
+import { balanceHistoryTableHtml, addedBalanceHistoryTableHtml } from "./components/history.js";
 import { openModal } from "../../shared/components/modal.js";
 import { showToast } from "../../shared/components/toast.js";
 import { usageRangeSummaryHtml } from "../usage/components/usageRangeSummary.js";
@@ -60,8 +60,8 @@ function buildNewBalanceDraft(overview) {
   return draft;
 }
 
-function buildEditDraft(entry) {
-  const draft = {};
+function buildEditDraft(entry, providers = []) {
+  const draft = Object.fromEntries(providers.map((provider) => [provider.provider_key, { total: 0, used: 0, left: 0, lastEdited: "used" }]));
   for (const value of entry.values) {
     draft[value.provider_key] = {
       total: numberValue(value.total_balance),
@@ -406,16 +406,17 @@ function addBalanceSectionHtml(overview, draft, entryDate) {
 // Edit / Delete saved history
 // ---------------------------------------------------------------------------
 
-async function showEditModal(entryId, overview, refreshPage, workspaceId) {
+async function showEditModal(entryId, overview, refreshPage, workspaceId, isCurrentWorkspace = () => true) {
   let entry;
   try {
     entry = await api.getHistoryEntry(entryId, workspaceId);
+    if (!isCurrentWorkspace()) return;
   } catch (error) {
-    showToast(error.message, "error");
+    if (isCurrentWorkspace()) showToast(error.message, "error");
     return;
   }
 
-  const draft = buildEditDraft(entry);
+  const draft = buildEditDraft(entry, overview.providers);
   const bodyHtml = `
     <div class="edit-form-grid">
       <div class="field edit-date-row">
@@ -452,6 +453,7 @@ async function showEditModal(entryId, overview, refreshPage, workspaceId) {
       const errorEl = root.querySelector("[data-edit-error]");
 
       saveButton.addEventListener("click", async () => {
+        if (!isCurrentWorkspace()) { errorEl.textContent = "Workspace changed. Close this editor and reopen the entry."; return; }
         const validationError = validateBalanceDraft(overview.providers, draft);
         if (validationError) {
           errorEl.textContent = validationError;
@@ -468,7 +470,7 @@ async function showEditModal(entryId, overview, refreshPage, workspaceId) {
           }, workspaceId);
           close();
           showToast("Saved history entry updated.", "success");
-          await refreshPage({ resetDrafts: true });
+          if (isCurrentWorkspace()) await refreshPage({ resetDrafts: true });
         } catch (error) {
           errorEl.textContent = error.message;
         } finally {
@@ -479,7 +481,65 @@ async function showEditModal(entryId, overview, refreshPage, workspaceId) {
   });
 }
 
-function showDeleteModal(entryId, entryDate, refreshPage, workspaceId) {
+async function showTopupModal(entryId, refreshPage, workspaceId, isCurrentWorkspace, classify = false) {
+  let entry;
+  try {
+    entry = await api.getHistoryEntry(entryId, workspaceId);
+    if (!isCurrentWorkspace()) return;
+  } catch (error) { if (isCurrentWorkspace()) showToast(error.message, "error"); return; }
+  const rows = entry.values.map((value) => `<tr data-topup-edit-row="${escapeHtml(value.provider_key)}">
+    <td><strong>${escapeHtml(value.display_name)}</strong></td>
+    <td data-topup-before>${classify ? "Enter actual addition" : formatBalance(value.balance_before, value.unit)}</td>
+    <td><input aria-label="${escapeHtml(value.display_name)} amount added" class="input table-input" type="number" min="0" step="any"
+      data-topup-amount value="${classify ? "" : inputNumber(value.added_balance)}" /></td>
+    <td data-topup-after>${formatBalance(value.left_balance, value.unit)}</td>
+    <td>${escapeHtml(value.unit)}</td></tr>`).join("");
+  openModal({
+    title: classify ? "Classify legacy entry as a top-up" : "Edit added balance",
+    bodyHtml: `<div class="edit-form-grid"><div class="field edit-date-row"><label for="topup-edit-date">Date</label>
+      <input class="input" id="topup-edit-date" type="date" value="${escapeHtml(entry.entry_date)}" /></div>
+      <div class="info-strip">${classify ? "Supply the actual amounts added. Saved balances stay unchanged; previous balances are calculated from those amounts. Every provider must have zero usage." : "Correct the amount added. The recorded balance before stays fixed and the balance after is recalculated."}</div>
+      <div class="table-wrap"><table><thead><tr><th>API provider</th><th>Balance before</th><th>Amount added</th><th>Balance after</th><th>Unit</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="error-text" data-topup-edit-error></div></div>`,
+    footerHtml: '<button class="btn" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="button" data-save-topup>Save changes</button>',
+    onReady: ({ root, close }) => {
+      const errorEl = root.querySelector("[data-topup-edit-error]");
+      const rowEls = [...root.querySelectorAll("[data-topup-edit-row]")];
+      const valueByKey = valueMap(entry);
+      rowEls.forEach((row) => row.querySelector("[data-topup-amount]").addEventListener("input", () => {
+        const value = valueByKey[row.dataset.topupEditRow];
+        const amount = parseNumberInput(row.querySelector("[data-topup-amount]").value);
+        if (amount === null || amount < 0) return;
+        row.querySelector("[data-topup-before]").textContent = formatBalance(classify ? value.left_balance - amount : value.balance_before, value.unit);
+        row.querySelector("[data-topup-after]").textContent = formatBalance(classify ? value.left_balance : value.balance_before + amount, value.unit);
+        errorEl.textContent = "";
+      }));
+      const button = root.querySelector("[data-save-topup]");
+      button.addEventListener("click", async () => {
+        if (!isCurrentWorkspace()) { errorEl.textContent = "Workspace changed. Close this editor and reopen the entry."; return; }
+        const additions = {};
+        for (const row of rowEls) {
+          const input = row.querySelector("[data-topup-amount]");
+          const amount = input.value.trim() === "" ? 0 : parseNumberInput(input.value);
+          if (amount === null || amount < 0) { errorEl.textContent = "Amounts must be valid non-negative numbers."; return; }
+          additions[row.dataset.topupEditRow] = amount;
+        }
+        if (!Object.values(additions).some((amount) => amount > 0)) { errorEl.textContent = "Enter a positive addition for at least one provider."; return; }
+        button.disabled = true;
+        errorEl.textContent = "";
+        try {
+          await api.updateAddedBalance(entryId, { entry_date: root.querySelector("#topup-edit-date").value, additions }, workspaceId);
+          close();
+          if (isCurrentWorkspace()) await refreshPage({resetDrafts:true});
+          showToast(classify ? "Legacy entry classified as an added balance." : "Added balance updated.", "success");
+        } catch (error) { errorEl.textContent = error.message; }
+        finally { button.disabled = false; }
+      });
+    },
+  });
+}
+
+function showDeleteModal(entryId, entryDate, refreshPage, workspaceId, isCurrentWorkspace = () => true) {
   const bodyHtml = `
     <div class="delete-warning">
       <strong>Delete the saved entry for ${formatDateShort(entryDate)}?</strong>
@@ -499,12 +559,13 @@ function showDeleteModal(entryId, entryDate, refreshPage, workspaceId) {
     onReady: ({ root, close }) => {
       const button = root.querySelector("[data-confirm-delete]");
       button.addEventListener("click", async () => {
+        if (!isCurrentWorkspace()) { showToast("Workspace changed. Close this dialog and reopen the entry.", "error"); return; }
         button.disabled = true;
         try {
           await api.deleteHistory(entryId, workspaceId);
           close();
           showToast("Balance history entry deleted.", "success");
-          await refreshPage({ resetDrafts: true });
+          if (isCurrentWorkspace()) await refreshPage({ resetDrafts: true });
         } catch (error) {
           showToast(error.message, "error");
           button.disabled = false;
@@ -528,6 +589,8 @@ export async function renderApiBalancesPage(container, { onUnauthorized, user } 
   let overview;
   let historyPage = 1;
   let pageSize = 5;
+  let topupPage = 1;
+  let topupPageSize = 5;
   let activeEditor = null; // null | "new" | "add"
   let newDraft = null;
   let addDraft = null;
@@ -547,6 +610,12 @@ export async function renderApiBalancesPage(container, { onUnauthorized, user } 
   let renderWorkspacePage = null;
   let refreshRequestNumber = 0;
   let usageRequestNumber = 0;
+  let workspaceGeneration = 0;
+  const workspaceGuard = () => {
+    const target = workspaceId;
+    const generation = workspaceGeneration;
+    return () => !workspaceLoading && Number(workspaceId) === Number(target) && generation === workspaceGeneration;
+  };
 
   const requestedWorkspaceId = () => {
     const query = globalThis.window?.location?.hash?.split("?")[1] || "";
@@ -554,8 +623,8 @@ export async function renderApiBalancesPage(container, { onUnauthorized, user } 
     return value && Number.isInteger(Number(value)) ? Number(value) : null;
   };
 
-  const fetchOverview = (targetWorkspaceId, page = historyPage, size = pageSize) =>
-    api.getOverview(page, size, targetWorkspaceId);
+  const fetchOverview = (targetWorkspaceId, page = historyPage, size = pageSize, additionsPage = topupPage) =>
+    api.getOverview(page, size, targetWorkspaceId, additionsPage, topupPageSize);
 
   const fetchUsageSummary = (targetWorkspaceId) => usageApi.getSummary({
     period: usagePeriod,
@@ -573,7 +642,7 @@ export async function renderApiBalancesPage(container, { onUnauthorized, user } 
 
   const workspaceDataController = createWorkspaceDataController(async (workspace) => {
     const [nextOverview, nextUsageSummary] = await Promise.all([
-      fetchOverview(workspace.id, 1),
+      fetchOverview(workspace.id, 1, pageSize, 1),
       fetchUsageSummary(workspace.id),
     ]);
     return { overview: nextOverview, usageSummary: nextUsageSummary };
@@ -586,6 +655,8 @@ export async function renderApiBalancesPage(container, { onUnauthorized, user } 
       overview = state.data.overview;
       historyPage = overview.pagination?.page || 1;
       pageSize = overview.pagination?.page_size || pageSize;
+      topupPage = overview.topup_pagination?.page || 1;
+      topupPageSize = overview.topup_pagination?.page_size || topupPageSize;
       applyUsageSummary(state.data.usageSummary);
       if (previousWorkspaceId != null && Number(previousWorkspaceId) !== Number(workspaceId)) {
         newDraft = buildNewBalanceDraft(overview);
@@ -628,6 +699,8 @@ export async function renderApiBalancesPage(container, { onUnauthorized, user } 
       overview = nextOverview;
       historyPage = overview.pagination?.page || historyPage;
       pageSize = overview.pagination?.page_size || pageSize;
+      topupPage = overview.topup_pagination?.page || 1;
+      topupPageSize = overview.topup_pagination?.page_size || topupPageSize;
       applyUsageSummary(nextUsageSummary);
       if (resetDrafts) {
         newDraft = buildNewBalanceDraft(overview);
@@ -708,7 +781,7 @@ export async function renderApiBalancesPage(container, { onUnauthorized, user } 
 
       ${editorHtml}
 
-      <section class="card section-card">
+      <section class="card section-card" id="balance-history-section">
         <div class="section-head">
           <div>
             <h2>Balance History</h2>
@@ -717,6 +790,13 @@ export async function renderApiBalancesPage(container, { onUnauthorized, user } 
           <div class="help">${overview.pagination?.total_items || 0} entries • ${overview.providers.length} providers</div>
         </div>
         <div class="section-body">${balanceHistoryTableHtml(overview, permissions)}</div>
+      </section>
+      <section class="card section-card" id="added-balance-history-section">
+        <div class="section-head"><div>
+          <h2>Added Balance History</h2>
+          <div class="help">Recorded additions, with each provider's balance before and after. Additions count as zero usage.</div>
+        </div><div class="help">${overview.topup_pagination?.total_items || 0} entries</div></div>
+        <div class="section-body">${addedBalanceHistoryTableHtml(overview, permissions)}</div>
       </section>
     `;
 
@@ -729,6 +809,7 @@ export async function renderApiBalancesPage(container, { onUnauthorized, user } 
     container.querySelector("[data-workspace-select]")?.addEventListener("change", async (event) => {
       const nextWorkspace = chooseWorkspaceForRole(user, workspaces, Number(event.target.value));
       if (workspaceLoading || !nextWorkspace || Number(nextWorkspace.id) === Number(workspaceId)) return;
+      workspaceGeneration += 1;
       refreshRequestNumber += 1;
       usageRequestNumber += 1;
       usageLoading = false;
@@ -942,7 +1023,7 @@ export async function renderApiBalancesPage(container, { onUnauthorized, user } 
             additions: additionsPayload(addDraft),
           }, workspaceId);
           showToast("Added balance saved. Current totals were updated.", "success");
-          historyPage = 1;
+          topupPage = 1;
           await refreshPage({ resetDrafts: true });
         } catch (error) {
           if (error.status === 401) {
@@ -956,14 +1037,20 @@ export async function renderApiBalancesPage(container, { onUnauthorized, user } 
       });
     }
 
+    // Entry-kind-specific correction and explicit legacy classification.
+    container.querySelectorAll("[data-edit-topup], [data-classify-entry]").forEach((button) => {
+      button.addEventListener("click", () => showTopupModal(Number(button.dataset.editTopup || button.dataset.classifyEntry),
+        refreshPage, workspaceId, workspaceGuard(), Boolean(button.dataset.classifyEntry)));
+    });
+
     // History edit/delete actions.
     container.querySelectorAll("[data-edit-entry]").forEach((button) => {
-      button.addEventListener("click", () => showEditModal(Number(button.dataset.editEntry), overview, refreshPage, workspaceId));
+      button.addEventListener("click", () => showEditModal(Number(button.dataset.editEntry), overview, refreshPage, workspaceId, workspaceGuard()));
     });
 
     container.querySelectorAll("[data-delete-entry]").forEach((button) => {
       button.addEventListener("click", () => {
-        showDeleteModal(Number(button.dataset.deleteEntry), button.dataset.entryDate, refreshPage, workspaceId);
+        showDeleteModal(Number(button.dataset.deleteEntry), button.dataset.entryDate, refreshPage, workspaceId, workspaceGuard());
       });
     });
 
@@ -973,8 +1060,22 @@ export async function renderApiBalancesPage(container, { onUnauthorized, user } 
         if (button.disabled) return;
         historyPage = Number(button.dataset.historyPage) || 1;
         await refreshPage();
-        container.querySelector(".section-card:last-child")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        container.querySelector("#balance-history-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
+    });
+
+    container.querySelectorAll("[data-topup-page]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        if (button.disabled) return;
+        topupPage = Number(button.dataset.topupPage) || 1;
+        await refreshPage();
+        container.querySelector("#added-balance-history-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+    container.querySelector("[data-topup-page-size]")?.addEventListener("change", async (event) => {
+      topupPageSize = Number(event.target.value) || 5;
+      topupPage = 1;
+      await refreshPage();
     });
 
     container.querySelector("[data-history-page-size]")?.addEventListener("change", async (event) => {

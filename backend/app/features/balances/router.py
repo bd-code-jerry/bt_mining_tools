@@ -16,6 +16,7 @@ from .service import (
     get_history_entry,
     overview,
     update_history_entry,
+    update_add_balance_entry,
 )
 
 router = APIRouter(prefix="/api/balances", tags=["balances"])
@@ -25,13 +26,15 @@ router = APIRouter(prefix="/api/balances", tags=["balances"])
 def get_overview(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=5, ge=1, le=100),
+    topup_page: int = Query(default=1, ge=1),
+    topup_page_size: int = Query(default=5, ge=1, le=100),
     workspace_id: int | None = Query(default=None, ge=1),
     user: dict = Depends(get_current_user),
 ):
     require_capability(user, "balances:read")
     with db_connection() as conn:
         workspace = resolve_workspace(conn, user, workspace_id)
-        return overview(conn, workspace_id=int(workspace["id"]), page=page, page_size=page_size)
+        return overview(conn, workspace_id=int(workspace["id"]), page=page, page_size=page_size, topup_page=topup_page, topup_page_size=topup_page_size)
 
 
 @router.get("/history/{entry_id}")
@@ -106,3 +109,14 @@ def delete_entry(
         workspace = resolve_workspace(conn, user, workspace_id, write=True)
         delete_history_entry(conn, entry_id, int(workspace["id"]))
     return {"ok": True}
+
+
+@router.put("/add-balance/{entry_id}")
+def update_add_balance(entry_id: int, body: AddBalanceBody,
+                       workspace_id: int | None = Query(default=None, ge=1),
+                       user: dict = Depends(get_current_user)):
+    require_capability(user, "balances:write")
+    with db_connection() as conn:
+        workspace = resolve_workspace(conn, user, workspace_id, write=True)
+        entry = update_add_balance_entry(conn, entry_id, int(user["id"]), body.model_dump(mode="json"), workspace_id=int(workspace["id"]))
+    return {"entry": entry}
